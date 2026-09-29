@@ -193,7 +193,7 @@ pub fn clean_text(text: &str) -> String {
     out.trim_end().to_string()
 }
 
-fn is_invisible(ch: char) -> bool {
+pub fn is_invisible(ch: char) -> bool {
     matches!(
         ch,
         '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{2060}' | '\u{FEFF}' | '\u{034F}' | '\u{00AD}'

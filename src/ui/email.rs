@@ -1,5 +1,6 @@
 //use crate::app::AppState;
 use crate::models::{Email, Theme};
+use crate::ui::HtmlBody;
 use gpui::{Context, Entity, Render, SharedString, Window, div, prelude::*, px, rgb, img};
 
 // Shows one opened email: subject, sender and body, with a back button.
@@ -13,8 +14,11 @@ pub struct EmailView {
     subject: SharedString,
     from: SharedString,
     /// Cleaned-up body text, computed once when the email is shown rather
-    /// than on every render.
+    /// than on every render. Only used for plain-text emails.
     body: SharedString,
+    /// Renders the body as real HTML when the email has any.
+    html_body: Entity<HtmlBody>,
+    is_html: bool,
 }
 
 impl EmailView {
@@ -31,6 +35,8 @@ impl EmailView {
             subject: SharedString::default(),
             from: SharedString::default(),
             body: SharedString::default(),
+            html_body: cx.new(HtmlBody::new),
+            is_html: false,
         }
     }
 
@@ -46,7 +52,16 @@ impl EmailView {
                 } else {
                     &email.body
                 };
-                self.body = crate::html_text::display_body(raw).into();
+                self.is_html = crate::html_text::looks_like_html(raw);
+                if self.is_html {
+                    self.body = SharedString::default();
+                    let html = raw.clone();
+                    self.html_body
+                        .update(cx, |view, cx| view.set_html(Some(html), cx));
+                } else {
+                    self.body = crate::html_text::display_body(raw).into();
+                    self.html_body.update(cx, |view, cx| view.set_html(None, cx));
+                }
                 self.subject = email.subject.clone().into();
                 self.from = email.from.clone().into();
                 self.email_id = Some(email.id);
@@ -56,6 +71,8 @@ impl EmailView {
                 self.subject = SharedString::default();
                 self.from = SharedString::default();
                 self.body = SharedString::default();
+                self.is_html = false;
+                self.html_body.update(cx, |view, cx| view.set_html(None, cx));
             }
         }
         cx.notify();
@@ -131,12 +148,15 @@ impl Render for EmailView {
                     // taller than that scrolls.
                     .overflow_y_scroll()
                     .pr(px(12.0))
-                    .child(
-                        div()
-                            .text_size(px(15.0))
-                            .text_color(rgb(theme.text))
-                            .child(self.body.clone()),
-                    ),
+                    .when(self.is_html, |el| el.child(self.html_body.clone()))
+                    .when(!self.is_html, |el| {
+                        el.child(
+                            div()
+                                .text_size(px(15.0))
+                                .text_color(rgb(theme.text))
+                                .child(self.body.clone()),
+                        )
+                    }),
             )
             .into_any_element()
     }

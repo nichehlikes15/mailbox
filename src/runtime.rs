@@ -46,6 +46,93 @@ pub fn http() -> &'static reqwest::Client {
     })
 }
 
+/// Client for fetching URLs that came from untrusted content (images in
+/// emails). It only connects to public internet addresses, so an email can't
+/// make the app poke at localhost, the LAN or cloud metadata endpoints.
+/// Hostnames are filtered at DNS resolution (which also covers redirects and
+/// DNS rebinding); literal IPs in URLs are checked with `is_public_url`, both
+/// up front and on every redirect hop.
+pub fn http_public() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
+            .dns_resolver(std::sync::Arc::new(PublicOnlyResolver))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 5 {
+                    attempt.error("too many redirects")
+                } else if is_public_url(attempt.url()) {
+                    attempt.follow()
+                } else {
+                    attempt.error("redirect to a non-public address")
+                }
+            }))
+            .build()
+            .expect("Failed to build public HTTP client")
+    })
+}
+
+/// http(s) URL whose host is a name (checked later, at DNS time) or a public IP.
+pub fn is_public_url(url: &reqwest::Url) -> bool {
+    if !matches!(url.scheme(), "http" | "https") {
+        return false;
+    }
+    match url.host() {
+        Some(url::Host::Domain(domain)) => !domain.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => is_public_ip(ip.into()),
+        Some(url::Host::Ipv6(ip)) => is_public_ip(ip.into()),
+        None => false,
+    }
+}
+
+fn is_public_ip(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_unspecified()
+                || v4.is_multicast()
+                || v4.is_documentation()
+                || a == 0
+                || (a == 100 && (64..128).contains(&b)) // carrier-grade NAT
+                || a >= 240)
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_public_ip(v4.into());
+            }
+            let first = v6.segments()[0];
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || (first & 0xfe00) == 0xfc00 // unique local
+                || (first & 0xffc0) == 0xfe80) // link local
+        }
+    }
+}
+
+struct PublicOnlyResolver;
+
+impl reqwest::dns::Resolve for PublicOnlyResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(async move {
+            let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((name.as_str(), 0))
+                .await?
+                .filter(|addr| is_public_ip(addr.ip()))
+                .collect();
+            if addrs.is_empty() {
+                return Err(format!("{} has no public address", name.as_str()).into());
+            }
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
 /// Client for long-lived streams (SSE). No overall timeout, or the stream
 /// would be cut off after 30 seconds.
 pub fn http_streaming() -> reqwest::Client {
@@ -99,5 +186,26 @@ impl<T> Future for AbortOnDrop<T> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         Pin::new(&mut self.0).poll(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_public_urls_pass() {
+        let ok = |u: &str| is_public_url(&reqwest::Url::parse(u).unwrap());
+        assert!(ok("https://example.com/a.png"));
+        assert!(ok("http://93.184.216.34/a.png"));
+        assert!(!ok("http://localhost:8080/"));
+        assert!(!ok("http://127.0.0.1/"));
+        assert!(!ok("http://192.168.1.1/"));
+        assert!(!ok("http://10.0.0.5/"));
+        assert!(!ok("http://169.254.169.254/latest/meta-data"));
+        assert!(!ok("http://[::1]/"));
+        assert!(!ok("http://[::ffff:127.0.0.1]/"));
+        assert!(!ok("http://[fd00::1]/"));
+        assert!(!ok("file:///etc/passwd"));
     }
 }
