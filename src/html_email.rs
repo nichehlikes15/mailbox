@@ -172,6 +172,7 @@ pub enum ImageSrc {
 }
 
 pub fn parse(html: &str) -> Document {
+    
     let html = Html::parse_document(html);
     let mut parser = Parser {
         remote_images: Vec::new(),
@@ -529,26 +530,64 @@ fn heading_size(tag: &str) -> Option<f32> {
     })
 }
 
+fn is_hidden(el: &ElementRef) -> bool {
+    if el.attr("hidden").is_some() {
+        return true;
+    }
+
+    let Some(style) = el.attr("style") else {
+        return false;
+    };
+
+    style.split(';').any(|property| {
+        let mut parts = property.splitn(2, ':');
+
+        let Some(name) = parts.next() else {
+            return false;
+        };
+
+        let Some(value) = parts.next() else {
+            return false;
+        };
+
+        let name = name.trim();
+        let value = value.trim().to_ascii_lowercase();
+
+        (name == "display" && value == "none")
+            || (name == "visibility" && value == "hidden")
+    })
+}
+
 impl Parser {
     fn walk_children(&mut self, el: ElementRef, ctx: &Ctx, flow: &mut Flow, depth: usize) {
         for child in el.children() {
             if self.truncated {
                 return;
             }
+
+            if let Some(child_el) = ElementRef::wrap(child) && is_hidden(&child_el) {
+                continue;
+            }
+
+
             match child.value() {
                 Node::Text(text) => {
                     self.chars += text.len();
+
                     if self.chars > MAX_TEXT_CHARS {
                         self.truncated = true;
                         return;
                     }
+
                     flow.push_text(text, ctx);
                 }
+
                 Node::Element(_) => {
                     if let Some(child) = ElementRef::wrap(child) {
                         self.walk_element(child, ctx, flow, depth + 1);
                     }
                 }
+
                 _ => {}
             }
         }
@@ -1081,7 +1120,7 @@ fn parse_color(value: &str) -> Option<u32> {
             3 => {
                 let n = u32::from_str_radix(hex, 16).ok()?;
                 let (r, g, b) = ((n >> 8) & 0xf, (n >> 4) & 0xf, n & 0xf);
-                Some((r * 0x11) << 16 | (g * 0x11) << 8 | b * 0x11)
+                Some((r * 0x11) << 16 | (g * 0x11) << 8 | (b * 0x11))
             }
             6 => u32::from_str_radix(hex, 16).ok(),
             8 => {

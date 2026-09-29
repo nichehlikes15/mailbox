@@ -594,6 +594,25 @@ impl Render for Sidebar {
                                                                         },
                                                                     ))
                                                                     .child("Custom Generate"),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .id("temp-menu-option-3")
+                                                                    .px(px(10.0))
+                                                                    .py(px(7.0))
+                                                                    .text_size(px(12.0))
+                                                                    .text_color(rgb(theme.text))
+                                                                    .hover(|item| {
+                                                                        item.bg(rgb(theme.selected_option))
+                                                                    })
+                                                                    .cursor_pointer()
+                                                                    .on_click(root_cx.listener(
+                                                                        move |this, _event, _window, cx| {
+                                                                            println!("Menu option 3 clicked");
+                                                                            this.temp_menu_open = false;
+                                                                        },
+                                                                    ))
+                                                                    .child("Add Existing"),
                                                             ),
                                                     ),
                                             )

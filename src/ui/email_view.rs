@@ -81,38 +81,55 @@ impl HtmlBody {
 }
 
 async fn download_image(url: String) -> Option<Arc<Image>> {
-    // The URL comes from the email, so only fetch public addresses.
     let url = reqwest::Url::parse(&url).ok()?;
+
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+
     if !crate::runtime::is_public_url(&url) {
         return None;
     }
+
     let response = crate::runtime::http_public()
         .get(url)
-        // Some image hosts refuse requests without a browser-like user agent.
-        .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Macintosh) mailbox")
+        .header(
+            reqwest::header::USER_AGENT,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) mailbox",
+        )
+        .header(
+            reqwest::header::ACCEPT,
+            "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        )
         .send()
         .await
         .ok()?
         .error_for_status()
         .ok()?;
+
     if response
         .content_length()
         .is_some_and(|len| len as usize > MAX_IMAGE_BYTES)
     {
         return None;
     }
+
     let mime = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(';').next())
-        .map(|v| v.trim().to_ascii_lowercase());
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(|value| value.trim().to_ascii_lowercase());
+
     let bytes = response.bytes().await.ok()?;
-    if bytes.len() > MAX_IMAGE_BYTES {
+
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
         return None;
     }
+
     let format = html_email::sniff_image_format(&bytes)
-        .or_else(|| mime.and_then(|m| ImageFormat::from_mime_type(&m)))?;
+        .or_else(|| mime.as_deref().and_then(ImageFormat::from_mime_type))?;
+
     Some(Arc::new(Image::from_bytes(format, bytes.to_vec())))
 }
 
