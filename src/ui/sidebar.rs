@@ -253,7 +253,7 @@ impl Render for Sidebar {
                             .gap(px(8.0))
                             .text_size(px(14.0))
                             .text_color(rgb(theme.text))
-                            .child("Mail")
+                            .child("mail")
                             .child(
                                 div()
                                     .h(px(25.0))
@@ -473,7 +473,7 @@ impl Render for Sidebar {
                             .gap(px(8.0))
                             .text_size(px(14.0))
                             .text_color(rgb(theme.text))
-                            .child("Temp Emails")
+                            .child("temp emails")
                             .child(
                                 div()
                                     .h(px(25.0))
