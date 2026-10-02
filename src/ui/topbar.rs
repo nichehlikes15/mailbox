@@ -107,6 +107,9 @@ impl Render for TopBar {
                                                 state: state_entity,
                                                 selected_theme,
                                                 theme_dropdown_open: false,
+                                                active_section: "general".to_string(),
+                                                avatar: None,
+                                                avatar_task: None,
                                             })
                                         },
                                     )
